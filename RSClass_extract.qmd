@@ -1,0 +1,78 @@
+RSClass_extract.m converted from MATLAB to R using chat.openAI.com.
+This result is untested and may have errors but may be helpful to show how syntax differs between MATLAB and R.
+
+```{r, results='asis'}
+# Set working directory and load required packages
+setwd("/Users/imars_mbp/Box Sync/ML_working")
+library(raster)
+library(ncdf4)
+
+# Define input/output directories and parameters
+file_path <- "/Users/imars_mbp/Box Sync/RS_Class_2023/Share/NetCDF_examples/4km_adg443_MO_means/"
+path_out <- "/Users/imars_mbp/Box Sync/RS_Class_2023/Share/NetCDF_examples/4km_adg443_MO_means/out/"
+prod <- "adg_443"
+
+# Get list of .nc files
+files <- list.files(path = file_path, pattern = "*.nc", full.names = TRUE)
+
+# Extract latitude and longitude from the first file
+nc <- nc_open(files[1])
+lat <- ncvar_get(nc, "lat")
+lon <- ncvar_get(nc, "lon")
+nc_close(nc)
+
+# Define locations for data extraction
+loc_lat <- c(42.88, -31.04, 25.65, -65.51)
+loc_lon <- c(-28.62, -13.46, -89.85, 28.56)
+bx_offset <- 50
+
+# Function to convert latitude and longitude to row and column indices
+latlon2pixline <- function(lat, lon, lat_grid, lon_grid) {
+  row_indices <- round(interp1(lat_grid, 1:length(lat_grid), lat))
+  col_indices <- round(interp1(lon_grid, 1:length(lon_grid), lon))
+  return(list(row_indices, col_indices))
+}
+
+# Convert geo coordinates to image (array) coordinates
+loc_indices <- latlon2pixline(loc_lat, loc_lon, lat[, 1], lon[1, ])
+loc_pts <- list()
+for (s in 1:length(loc_lat)) {
+  loc_pts_tmp <- matrix(0, nrow = nrow(lat), ncol = ncol(lon))
+  loc_pts_tmp[loc_indices[[1]][s] - bx_offset:loc_indices[[1]][s] + bx_offset,
+              loc_indices[[2]][s] - bx_offset:loc_indices[[2]][s] + bx_offset] <- 1
+  loc_pts[[s]] <- loc_pts_tmp
+}
+
+# Loop through files for data extraction
+pt_ts_mn <- matrix(NA, nrow = length(files), ncol = length(loc_lat))
+for (i in 1:length(files)) {
+  file <- files[i]
+  nc <- nc_open(file)
+  img_tmp <- ncvar_get(nc, prod)
+  scl <- ncatt_get(nc, varid = prod, "scale_factor")$value
+  offset <- ncatt_get(nc, varid = prod, "add_offset")$value
+  img_tmp <- img_tmp * scl + offset
+  img_tmp[img_tmp <= 0] <- NA
+  
+  for (s in 1:length(loc_lat)) {
+    pt_ts_mn[i, s] <- nanmean(img_tmp[loc_pts[[s]] == 1])
+  }
+  
+  nc_close(nc)
+}
+
+# Convert time from filenames
+filenames <- basename(files)
+year_st <- as.numeric(substr(filenames, 12, 15))
+month_st <- as.numeric(substr(filenames, 16, 17))
+day_st <- as.numeric(substr(filenames, 18, 19))
+mltime <- as.Date(sprintf("%04d-%02d-%02d", year_st, month_st, day_st))
+
+# Plotting
+par(mfrow = c(3, 1), mar = c(4, 4, 2, 1))
+plot(mltime, pt_ts_mn[, 1], type = 'l', col = 'blue', xlab = 'Date', ylab = 'N. Atl.', main = '2015 monthly Chl time-series')
+lines(mltime, pt_ts_mn[, 2], col = 'red')
+lines(mltime, pt_ts_mn[, 3], col = 'green')
+lines(mltime, pt_ts_mn[, 4], col = 'purple')
+legend("topright", legend = c('N. Atl.', 'S. Atl.', 'GoM', 'Southern Ocean'), col = c('blue', 'red', 'green', 'purple'), lty = 1)
+```
